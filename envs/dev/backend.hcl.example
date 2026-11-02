@@ -1,0 +1,7 @@
+# Copy to backend.hcl (git ignored) and fill in from `terraform output backend_hcl` in bootstrap/.
+bucket       = "sentinel-tfstate-<account-id>-us-east-1"
+key          = "operation-sentinel/dev/terraform.tfstate"
+region       = "us-east-1"
+encrypt      = true
+kms_key_id   = "arn:aws:kms:us-east-1:<account-id>:key/<key-id>"
+use_lockfile = true

@@ -1,0 +1,21 @@
+# Copy to terraform.tfvars (git ignored).
+alert_email = "you@example.com"
+
+# Output of bootstrap/: deploy_role_arn. Its IAM changes are alerted on but never quarantined.
+authorized_actor_arns = [
+  "arn:aws:iam::<account-id>:role/gha-operation-sentinel-deploy",
+]
+
+# A break glass role that is allowed to lift a quarantine. Leave empty to forbid releases.
+# In CI, set the same list as the RELEASE_PRINCIPAL_ARNS repository variable (JSON).
+release_principal_arns = []
+
+# Extra account IDs a protected role's trust policy may name without being quarantined.
+trusted_account_ids = []
+
+# Optional, defaults shown.
+# name_prefix                = "sentinel"   # must match bootstrap name_prefix
+# log_retention_days         = 90
+# trail_retention_days       = 365
+# deploy_monitored_resources = true         # test role and bucket for tests/attack
+# force_destroy              = true         # dev only

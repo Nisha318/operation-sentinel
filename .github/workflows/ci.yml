@@ -1,0 +1,96 @@
+name: ci
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+env:
+  TF_VERSION: "1.11.4"
+  CHECKOV_VERSION: "3.4.0"
+  # Images are pinned by digest as well as tag. The tag is kept for readability.
+  CONFTEST_IMAGE: "openpolicyagent/conftest:v0.56.0@sha256:9204b38318a7b4be4e49403d81a6c53ed81a99d0c3dd770a216a65edb9a412c7"
+  # Trivy pulls the latest checks bundle at runtime, so the binary must stay current. 0.58
+  # already fails to parse some checks in the current bundle and skips them.
+  TRIVY_IMAGE: "aquasec/trivy:0.76.1@sha256:790fd66d1697395d8693d1acaa1ea702406a20f109b6fc7bac8db623eca6c06c"
+  AWS_REGION: us-east-1
+
+# Every third party action is pinned to a full commit SHA. Tags are mutable, and the Trivy
+# and KICS actions were compromised in Q1 2026. The trailing comment records the tag.
+jobs:
+  unit-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.13"
+      - run: pip install -r requirements-dev.txt
+      - run: python -m pytest -q
+
+  static-analysis:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+      - name: Format
+        run: terraform fmt -check -recursive
+      - name: Validate each root
+        run: |
+          for dir in bootstrap envs/dev; do
+            terraform -chdir="$dir" init -backend=false -input=false
+            terraform -chdir="$dir" validate
+          done
+      - name: Checkov
+        run: |
+          pip install "checkov==${CHECKOV_VERSION}"
+          checkov --config-file .checkov.yaml
+      - name: Trivy IaC scan
+        run: |
+          docker run --rm -v "$PWD:/work" -w /work "${TRIVY_IMAGE}" \
+            config --severity HIGH,CRITICAL --exit-code 1 .
+      - name: OPA unit tests
+        run: |
+          docker run --rm -v "$PWD:/project" "${CONFTEST_IMAGE}" \
+            verify --policy policies
+
+  plan-and-policy-gate:
+    runs-on: ubuntu-latest
+    needs: [unit-tests, static-analysis]
+    permissions:
+      id-token: write
+      contents: read
+    # Same inputs as deploy.yml, so the plan OPA judges here is the plan that would be applied.
+    env:
+      TF_VAR_alert_email: ${{ vars.ALERT_EMAIL }}
+      TF_VAR_authorized_actor_arns: '["${{ vars.AWS_DEPLOY_ROLE_ARN }}"]'
+      TF_VAR_release_principal_arns: ${{ vars.RELEASE_PRINCIPAL_ARNS || '[]' }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+      - uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4
+        with:
+          role-to-assume: ${{ vars.AWS_PLAN_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+      - name: Plan (read only, no state lock)
+        working-directory: envs/dev
+        run: |
+          terraform init -input=false \
+            -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}" \
+            -backend-config="key=operation-sentinel/dev/terraform.tfstate" \
+            -backend-config="region=${AWS_REGION}" \
+            -backend-config="encrypt=true" \
+            -backend-config="kms_key_id=${{ vars.TF_STATE_KMS_KEY_ARN }}"
+          terraform plan -input=false -lock=false -out=tfplan
+          terraform show -json tfplan > plan.json
+      - name: Policy gate (OPA via conftest)
+        run: |
+          docker run --rm -v "$PWD:/project" "${CONFTEST_IMAGE}" \
+            test envs/dev/plan.json --policy policies --namespace sentinel.terraform

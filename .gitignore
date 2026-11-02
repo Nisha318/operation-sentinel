@@ -1,0 +1,23 @@
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+plan.json
+crash.log
+backend.hcl
+terraform.tfvars
+*.auto.tfvars
+.build/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+
+# Local
+.DS_Store
+
+# Editor tooling
+.kiro/

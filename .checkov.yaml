@@ -1,0 +1,36 @@
+framework:
+  - terraform
+directory:
+  - bootstrap
+  - envs
+  - modules
+quiet: true
+compact: true
+download-external-modules: false
+
+# Each skip is a deliberate, documented tradeoff for a single account dev capstone.
+skip-check:
+  # Log bucket access logging and cross region replication add cost and a second bucket
+  # for little value here. CloudTrail log file validation is on instead.
+  - CKV_AWS_18
+  - CKV_AWS_144
+  - CKV2_AWS_62
+  # Lambda in a VPC would break access to the IAM, S3 and SNS public endpoints without NAT.
+  - CKV_AWS_117
+  # Reserved concurrency can fail in new accounts with a low concurrency quota.
+  - CKV_AWS_115
+  # Code signing needs a signing profile pipeline. Out of scope for this capstone.
+  - CKV_AWS_272
+  # The webhook secret is rotated by hand when the Slack app is regenerated.
+  - CKV2_AWS_57
+  # 90 day Lambda log retention in dev. Raise log_retention_days to 365 for production.
+  - CKV_AWS_338
+  - CKV_AWS_66
+  # Deliberate wildcard resource: X-Ray and kms:CreateKey do not support resource level scoping.
+  - CKV_AWS_111
+  - CKV_AWS_356
+
+# Inline skips (kept next to the code they cover, listed here so they are reviewed together):
+#   CKV_AWS_109 on bootstrap/main.tf aws_iam_policy_document.state_key. The key policy's root
+#   statement is the AWS default delegation to account IAM. Narrowing it risks locking the
+#   state key. The deploy role carries an explicit Deny on managing that key instead.
